@@ -29,9 +29,23 @@ typedef enum Um_opcode {
 
 
 /* Functions that return the two instruction types */
+static const unsigned RWIDTH = 3;
+static const unsigned IWIDTH = 4;
+Um_instruction three_register(Um_opcode op, int ra, int rb, int rc) 
+{
+        Um_instruction inst = 0x0;
+        inst = Bitpack_newu(inst, RWIDTH, 0, rc);
+        inst = Bitpack_newu(inst, RWIDTH, 3, rb);
+        inst = Bitpack_newu(inst, RWIDTH, 6, ra); 
+        return Bitpack_newu(inst, IWIDTH, 28, op); 
+}
 
-Um_instruction three_register(Um_opcode op, int ra, int rb, int rc);
-Um_instruction loadval(unsigned ra, unsigned val);
+Um_instruction loadval(unsigned ra, unsigned val) {
+        Um_instruction inst = 0x0;
+        inst = Bitpack_newu(inst, IWIDTH, 28, LV);
+        inst = Bitpack_newu(inst, RWIDTH, 25, ra);
+        return Bitpack_newu(inst, 25, 0, val);
+}
 
 
 /* Wrapper functions for each of the instructions */
@@ -48,7 +62,10 @@ static inline Um_instruction add(Um_register a, Um_register b, Um_register c)
         return three_register(ADD, a, b, c);
 }
 
-Um_instruction output(Um_register c);
+Um_instruction output(Um_register c)
+{
+        return three_register(OUT, 0, 0, c);
+}
 
 /* Functions for working with streams */
 
@@ -96,3 +113,17 @@ void build_verbose_halt_test(Seq_T stream)
         append(stream, output(r1));
 }
 
+void build_add_test(Seq_T stream)
+{
+        append(stream, add(r1, r2, r3));
+        append(stream, halt());
+}
+
+void build_print_six_test(Seq_T stream)
+{
+        append(stream, loadval(r1, 48));
+        append(stream, loadval(r2, 6));
+        append(stream, add(r3, r1, r2));
+        append(stream, output(r3));
+        append(stream, halt());
+}
