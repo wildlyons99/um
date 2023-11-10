@@ -1,0 +1,4 @@
+-------------------- Segmented Memory Funtions ------------------------------
+
+/* SegMem_new
+ *      Instantiate a new module which contains many segments
