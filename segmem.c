@@ -1,27 +1,57 @@
-/* segmem 
+/* segmem.c
  * Authors: Tom Lyons     tlyons01
  *          Noah Stiegler nstieg01
+ * Date: November 20, 2023
+ * CS40 HW 6 Universal Machine
  * 
- * 
+ * Implements segmented memory. It keeps track of the instruction pointer
+ * (program counter). Stores the currently executing code as well as data in 
+ * memory. It fetches the next instruction, fetches words from memory, stores 
+ * words in memory, maps new segments and unmaps existing segments.
+
  */
 
 /* Header */
 #include "segmem.h"
 
 /* C Std Libs */
-#include <stdio.h>
 #include <stdint.h> 
 
 /* Hanson Libs */
 #include <seq.h>
 #include <table.h>
+#include <mem.h>
+#include <assert.h>
+#include <uarray.h>
 
-/* Complete the incomplete struct definition */
+/* Course Libs */
+#include <bitpack.h>
+
+/* 32 bit words */
+static const int BYTES_IN_WORD = sizeof(word_t) / sizeof(char); 
+static const int BITS_IN_BYTES = sizeof(char) * 8;
+
+/* Guess of how many words a program is when loaded for the first time */
+static const unsigned PROGRAM_SIZE_GUESS = 65536; /* arbitrary guess */
+static const unsigned SEGMENTS_TO_USE_GUESS = 1024; /* arbitrary */
+
+
+/* function defintions */
+static word_t read_word(FILE *input);
+
+/* Defines the implementation of a SegMen_T instance */
 struct SegMem_T {
-        Seq_T seg0;
-        Table_T data_segments;
-        uint32_t instruction_pointer;
-}; 
+        /* Sequence of segments (represented as sequences) */
+        Seq_T data_segments;
+        
+        /* Sequence of segment IDs. Seq represents a stack
+         * INVARIANT: Holds unmapped segment IDs (which had been mapped)
+         * Note: Use high as the top of the stack */
+        Seq_T unmapped_stack;
+        
+        /* Index in seg0 of next instruction to run (instruction pointer) */
+        word_t ip;
+};
 
 /* SegMem_new
  * Purpose: 
@@ -36,9 +66,65 @@ struct SegMem_T {
  *                 the universal machine 
  * Notes: 
  *      - CRE for input_file to be NULL
+ *      - Reads file till the end but does not close it
  */
-SegMem_T SegMem_new(FILE *input_file); 
+SegMem_T SegMem_new(FILE *input)
+{
+        assert(input != NULL);
+        
+        Seq_T seg0 = Seq_new(PROGRAM_SIZE_GUESS);
+        
+        /* print out file char for char */
+        int c;
+        while (!feof(input)) {
+                c = fgetc(input);
+                if (c != EOF) {
+                        ungetc(c, input);
+                        Seq_addhi(seg0, (void *)(uintptr_t)read_word(input)); 
+                }
+        }
 
+        /* Put struct together */
+        SegMem_T new_mem = NEW(new_mem);
+        Seq_T data_segments = Seq_new(SEGMENTS_TO_USE_GUESS);
+        Seq_addhi(data_segments, seg0);
+        new_mem->data_segments = data_segments;
+        new_mem->unmapped_stack = Seq_new(SEGMENTS_TO_USE_GUESS);
+        new_mem->ip = 0;
+        
+        return new_mem;
+}
+
+
+
+/* read_word
+ * Purpose:
+ *      Read a single 32-bit word from an input in Big-Endian order
+ * Arguments:
+ *      (FILE *) input
+ * Returns: 
+ *      (word_t) the bitpacked word in big endian from input
+ * Notes:
+ *      - CRE for input to be NULL
+ *      - CRE for file to end in the middle of a 32-bit word
+ */
+static word_t read_word(FILE *input) 
+{
+        word_t word = 0;
+        int c;
+        
+        assert(input != NULL);
+        
+        /* bittpack 32 bit word with data from file in big endian order */
+        for (int i = BYTES_IN_WORD - 1; i >= 0; i--) {
+                c = fgetc(input);
+                assert(c != EOF);
+
+                word = Bitpack_newu(word, 8, i * BITS_IN_BYTES, c); 
+        }
+
+        return word;
+}
 
 /* SegMem_fetch_next_i
  * Purpose: 
@@ -46,29 +132,66 @@ SegMem_T SegMem_new(FILE *input_file);
  * Arguments:
  *      (SegMem_T) mem - The memory to get the instruction from
  * Returns:
- *      (uint32_t) that contains the next instruction for the um to execute
+ *      (word_t) that contains the next instruction for the um to execute
  * Notes:
  *      - CRE for mem to be NULL 
+ *      - CRE for mem->data_segments to be NULL
  *      - URE for the next instruction to be asked for when there are no more
  *        instructions
  */
-uint32_t SegMem_fetch_next_i(SegMem_T mem);
+word_t SegMem_fetch_next_i(SegMem_T mem)
+{
+        assert(mem != NULL);
+        assert(mem->data_segments != NULL);
+
+        Seq_T seg0 = Seq_get(mem->data_segments, 0);
+        
+        return (uintptr_t)Seq_get(seg0, mem->ip++);
+}
 
 /* SegMem_map
  * Purpose:
  *      Maps a new segment in the memory of a given size and gives back its id
  * Arguments:
  *      (SegMem_T) mem - The memory to map a new segment in
- *      (uint32_t) size - the number of words the segment can store
+ *      (word_t) size - the number of words the segment can store
  * Returns:
- *      (uint32_t) that contains the segment identifier for the newly mapped
+ *      (word_t) that contains the segment identifier for the newly mapped
  *                 segment
  * Notes:
- *      - CRE for mem to be NULL
+ *      - CRE for mem to be NULL or mem->data_segments, or mem_unmapped_stack
+ *        to be NULL
  *      - CRE for a segment to be mapped if 2^32 segments are already mapped
  *      - CRE if there isn't enough memory to map a segment of the given size
  */
-uint32_t SegMem_map(SegMem_T mem, uint32_t size); 
+word_t SegMem_map(SegMem_T mem, word_t size)
+{
+        assert(mem != NULL); 
+        assert(mem->data_segments != NULL);
+        assert(mem->unmapped_stack != NULL);
+
+        /* Full Sequence ??? - Add notee that cannot be full perhaps */
+        // assert(Seq_length(mem->data_segments) < ((uint64_t)1 << 32) || 
+        //        Seq_length(mem->unmapped_stack) > 0); 
+
+        /* make a new sequence of the correct length filled with 0s */
+        Seq_T new_seg = Seq_new(size);
+        for (uint32_t i = 0; i < size; i++) {
+                Seq_addhi(new_seg, (void *)(uintptr_t)0x0);
+        }
+        
+        /* Figure out what segment id this segment should be */
+        word_t segment_id;
+        if (Seq_length(mem->unmapped_stack) > 0) {
+                segment_id = (uintptr_t)Seq_remhi(mem->unmapped_stack);
+                Seq_put(mem->data_segments, segment_id, new_seg);
+        } else {
+                Seq_addhi(mem->data_segments, new_seg);
+                segment_id = Seq_length(mem->data_segments) - 1;
+        }
+
+        return segment_id;
+}
 
 /* SegMem_unmap
  * Purpose:
@@ -76,10 +199,26 @@ uint32_t SegMem_map(SegMem_T mem, uint32_t size);
  * Arguments: 
  *      (SegMem_T) mem - The memory to unmap the segment in
  * Notes:
- *      - CRE for mem to be NULL
+ *      - CRE for mem, mem->data_segments, or mem->unmapped_stack to be NULL
  *      - URE if unmapping a segment that is not mapped.
  */
-void SegMem_unmap(SegMem_T mem); 
+void SegMem_unmap(SegMem_T mem, word_t seg_id)
+{
+        assert(mem != NULL);
+        assert(mem->data_segments != NULL);
+        assert(mem->unmapped_stack != NULL);
+
+        /* Get segment to unmap */
+        Seq_T segment = Seq_get(mem->data_segments, seg_id);
+        assert(segment != NULL);
+
+        /* Free it and put NULL in its place */
+        Seq_free(&segment);
+        Seq_put(mem->data_segments, seg_id, NULL); 
+        
+        /* Save its ID to reuse */
+        Seq_addhi(mem->unmapped_stack, (void *)(uintptr_t)seg_id);
+}
 
 
 /* SegMem_get_word
@@ -87,14 +226,26 @@ void SegMem_unmap(SegMem_T mem);
  *      Retrieve a word stored in memory at the given segment and index
  * Arguments:
  *      (SegMem_T) mem - The memory to get the word from
- *      (uint32_t) seg_id - The segment to get the word from
- *      (uint32_t) word_idx - Which word in the segment to get
+ *      (word_t) seg_id - The segment to get the word from
+ *      (word_t) word_idx - Which word in the segment to get
+ * Returns:
+ *      (word_t) holding the word      
  * Notes:
  *      - CRE for mem to be NULL
- *      - URE for seg_id to refer to a segment which doesn't exist
+ *      - CRE for mem->data_segments to be NULL
+ *      - CRE for seg_id to refer to a segment which doesn't exist
  *      - URE for word_idx to refer to a word outside the bounds of the segment
  */
-uint32_t SegMem_get_word(SegMem_T mem, uint32_t seg_id, uint32_t word_idx); 
+word_t SegMem_get_word(SegMem_T mem, word_t seg_id, word_t word_idx)
+{
+        assert(mem != NULL);
+        assert(mem->data_segments != NULL);
+
+        Seq_T segment = Seq_get(mem->data_segments, seg_id); 
+        assert(segment != NULL);
+
+        return (uintptr_t)Seq_get(segment, word_idx);
+}
 
 
 /* SegMem_put_word
@@ -102,15 +253,25 @@ uint32_t SegMem_get_word(SegMem_T mem, uint32_t seg_id, uint32_t word_idx);
  *      Puts a word into memory at the given segment and index
  * Arguments:
  *      (SegMem_T) mem - The memory to put the word into
- *      (uint32_t) seg_id - The segment to put the word into
- *      (uint32_t) word_idx - Which word in the segment to set
- *      (uint32_t) word - the word to be put into memory 
+ *      (word_t) seg_id - The segment to put the word into
+ *      (word_t) word_idx - Which word in the segment to set
+ *      (word_t) word - the word to be put into memory 
  * Notes:
  *      - CRE for mem to be NULL
+ *      - CRE for mem->data_segments to be NULL
  *      - URE for seg_id 
  */
-uint32_t SegMem_put_word(SegMem_T mem, uint32_t seg_id, uint32_t word_idx, 
-                         uint32_t word); 
+void SegMem_put_word(SegMem_T mem, word_t seg_id, word_t word_idx, 
+                         word_t word)
+{
+        assert(mem != NULL);
+        assert(mem->data_segments != NULL);
+
+        Seq_T segment = Seq_get(mem->data_segments, seg_id); 
+        assert(segment != NULL);
+
+        Seq_put(segment, word_idx, (void *)(uintptr_t)word);
+}
 
 /* SegMem_load_program
  * Purpose: 
@@ -119,18 +280,47 @@ uint32_t SegMem_put_word(SegMem_T mem, uint32_t seg_id, uint32_t word_idx,
  *      to the provided value
  * Arguments:
  *      (SegMem_T) mem - The memory to load the program from/into
- *      (uint32_t) seg_id - The segment in mem to load the program from
- *      (uint32_t) new_program_counter - The word index in the new program to 
+ *      (word_t) seg_id - The segment in mem to load the program from
+ *      (word_t) new_program_counter - The word index in the new program to 
  *                                       start reading instructions from
  * Notes:
- *      - CRE for mem to be NULL
+ *      - CRE for mem, mem->data_segments, or mem->unmapped_stack to be NULL
  *      - URE for seg_id to not refer to a mapped segment
  *      - URE for new_program_counter to refer to an instruction out of bounds
  *        of the new program
  *      - Incredibly quick to load segment 0
  * */
-void SegMem_load_program(SegMem_T mem, uint32_t seg_id,
-                         uint32_t new_program_counter);
+void SegMem_load_program(SegMem_T mem, word_t seg_id,
+                         word_t new_program_counter)
+{
+        assert(mem != NULL);
+        assert(mem->data_segments != NULL);
+        assert(mem->unmapped_stack != NULL);
+
+        assert(seg_id < (uint32_t)Seq_length(mem->data_segments));
+
+        /* Update instruction pointer */
+        mem->ip = new_program_counter;
+
+        /* Fast case - don't need to copy anything! */
+        if (seg_id == 0) { 
+                return; 
+        } 
+
+        /* Replace old seg0 with copy of new segment */
+        Seq_T old_seg0 = Seq_get(mem->data_segments, 0);
+        Seq_free(&old_seg0); 
+        
+        Seq_T to_copy = Seq_get(mem->data_segments, seg_id);        
+        int length = Seq_length(to_copy);
+        Seq_T new_seg_0 = Seq_new(length);
+        
+        for (int i = 0; i < length; i++) {
+                Seq_addhi(new_seg_0, Seq_get(to_copy, i)); 
+        }
+
+        Seq_put(mem->data_segments, 0, new_seg_0);
+}
 
 /* SegMem_free
  * Purpose: 
@@ -139,16 +329,36 @@ void SegMem_load_program(SegMem_T mem, uint32_t seg_id,
  *      (SegMem_T) mem - The memory to free
  * Notes:
  *      - CRE if mem is null
- *      - CRE if mem->seg0 or mem->data_segments is NULL
+ *      - CRE mem->data_segments is NULL
+ *      - CRE if mem->unmapped_stack is NULL
  */
-void SegMem_free(SegMem_T &mem); 
+void SegMem_free(SegMem_T *mem)
+{
+        assert(mem != NULL);
+        assert(*mem != NULL);
 
+        SegMem_T memory = *mem;
+        assert(memory->data_segments != NULL);
+        assert(memory->unmapped_stack != NULL);
 
-/* ---- private static funcs */
+        /* Free all segments in our data segments */
+        uint32_t length = Seq_length(memory->data_segments);
+        for (uint32_t i = 0; i < length; i++) {
+                Seq_T to_delete = Seq_get(memory->data_segments, i);
+                if (to_delete != NULL) {
+                        Seq_free(&to_delete);
+                }
+        }
 
-initialize segment id tracker
+        /* Free the collection of segments */
+        Seq_free(&(memory->data_segments));
+        
+        /* Free the stack holding unmapped memory addresses */
+        Seq_free(&(memory->unmapped_stack));
 
-turn file into segment
+        /* Free struct */
+        FREE(memory);
 
-make new segment segment 0
-
+        /* Set user's pointer to NULL */
+        *mem = NULL;
+}
