@@ -4,11 +4,10 @@
  * Date: November 20, 2023
  * CS40 HW 6 Universal Machine
  * 
- * Implements segmented memory. It keeps track of the instruction pointer
- * (program counter). Stores the currently executing code as well as data in 
+ * Implements segmented memory. It keeps track of the instruction pointer. 
+ * Stores the currently executing code as well as data in 
  * memory. It fetches the next instruction, fetches words from memory, stores 
  * words in memory, maps new segments and unmaps existing segments.
-
  */
 
 /* Header */
@@ -19,24 +18,22 @@
 
 /* Hanson Libs */
 #include <seq.h>
-#include <table.h>
 #include <mem.h>
 #include <assert.h>
-#include <uarray.h>
 
 /* Course Libs */
 #include <bitpack.h>
 
 /* 32 bit words */
 static const int BYTES_IN_WORD = sizeof(word_t) / sizeof(char); 
-static const int BITS_IN_BYTES = sizeof(char) * 8;
+static const int BITS_IN_BYTE = sizeof(char) * 8;
 
 /* Guess of how many words a program is when loaded for the first time */
-static const unsigned PROGRAM_SIZE_GUESS = 65536; /* arbitrary guess */
-static const unsigned SEGMENTS_TO_USE_GUESS = 1024; /* arbitrary */
+static const unsigned PROGRAM_SIZE_GUESS = 65536;
+/* Guess of how many segments a program will use */
+static const unsigned SEGMENTS_TO_USE_GUESS = 1024;
 
-
-/* function defintions */
+/* helper function defintions */
 static word_t read_word(FILE *input);
 
 /* Defines the implementation of a SegMen_T instance */
@@ -45,7 +42,8 @@ struct SegMem_T {
         Seq_T data_segments;
         
         /* Sequence of segment IDs. Seq represents a stack
-         * INVARIANT: Holds unmapped segment IDs (which had been mapped)
+         * INVARIANT: Holds unmapped segment IDs (which had been previously 
+         * mapped)
          * Note: Use high as the top of the stack */
         Seq_T unmapped_stack;
         
@@ -66,6 +64,7 @@ struct SegMem_T {
  *                 the universal machine 
  * Notes: 
  *      - CRE for input_file to be NULL
+ *      - CRE for the file to end in the middle of a 32-bit word
  *      - Reads file till the end but does not close it
  */
 SegMem_T SegMem_new(FILE *input)
@@ -74,9 +73,10 @@ SegMem_T SegMem_new(FILE *input)
         
         Seq_T seg0 = Seq_new(PROGRAM_SIZE_GUESS);
         
-        /* print out file char for char */
+        /* Read in file one 32-bit word at a time */
         int c;
         while (!feof(input)) {
+                /* Check to make sure we aren't at the end of a file */
                 c = fgetc(input);
                 if (c != EOF) {
                         ungetc(c, input);
@@ -110,17 +110,16 @@ SegMem_T SegMem_new(FILE *input)
  */
 static word_t read_word(FILE *input) 
 {
-        word_t word = 0;
-        int c;
-        
         assert(input != NULL);
         
-        /* bittpack 32 bit word with data from file in big endian order */
+        /* bitpack 32 bit word with data from file in big endian order */
+        word_t word = 0;
+        int c;
         for (int i = BYTES_IN_WORD - 1; i >= 0; i--) {
                 c = fgetc(input);
                 assert(c != EOF);
 
-                word = Bitpack_newu(word, 8, i * BITS_IN_BYTES, c); 
+                word = Bitpack_newu(word, 8, i * BITS_IN_BYTE, c); 
         }
 
         return word;
@@ -154,7 +153,7 @@ word_t SegMem_fetch_next_i(SegMem_T mem)
  *      Maps a new segment in the memory of a given size and gives back its id
  * Arguments:
  *      (SegMem_T) mem - The memory to map a new segment in
- *      (word_t) size - the number of words the segment can store
+ *      (word_t) size - the number of words the segment should store
  * Returns:
  *      (word_t) that contains the segment identifier for the newly mapped
  *                 segment
@@ -163,16 +162,20 @@ word_t SegMem_fetch_next_i(SegMem_T mem)
  *        to be NULL
  *      - CRE for a segment to be mapped if 2^32 segments are already mapped
  *      - CRE if there isn't enough memory to map a segment of the given size
+ *      - The Hanson sequence implementation can only store a max of 2^31 
+ *        segements at once
+ *              - Regardless, storing 2^31 segments (if empty, they're still
+ *                void pointers which take 8 bytes of memory) would use ~17 GB 
+ *                of memory, which is outside the mem scope (of our program)
+ *              - And storing 2^32 32-bit words (hypothetically the max in
+ *                one segment) would take the same amount of memory and would
+ *                not be supported by the Hanson sequence 
  */
 word_t SegMem_map(SegMem_T mem, word_t size)
 {
         assert(mem != NULL); 
         assert(mem->data_segments != NULL);
-        assert(mem->unmapped_stack != NULL);
-
-        /* Full Sequence ??? - Add notee that cannot be full perhaps */
-        // assert(Seq_length(mem->data_segments) < ((uint64_t)1 << 32) || 
-        //        Seq_length(mem->unmapped_stack) > 0); 
+        assert(mem->unmapped_stack != NULL); 
 
         /* make a new sequence of the correct length filled with 0s */
         Seq_T new_seg = Seq_new(size);
@@ -183,9 +186,11 @@ word_t SegMem_map(SegMem_T mem, word_t size)
         /* Figure out what segment id this segment should be */
         word_t segment_id;
         if (Seq_length(mem->unmapped_stack) > 0) {
+                /* We have an unmapped space in data_segments */
                 segment_id = (uintptr_t)Seq_remhi(mem->unmapped_stack);
                 Seq_put(mem->data_segments, segment_id, new_seg);
         } else {
+                /* Need to expand data_segments */
                 Seq_addhi(mem->data_segments, new_seg);
                 segment_id = Seq_length(mem->data_segments) - 1;
         }
@@ -198,6 +203,7 @@ word_t SegMem_map(SegMem_T mem, word_t size)
  *      Unmap a segment of memory allowing for its segment ID to be reused
  * Arguments: 
  *      (SegMem_T) mem - The memory to unmap the segment in
+ *      (word_t) seg_id - Which segment to unmap
  * Notes:
  *      - CRE for mem, mem->data_segments, or mem->unmapped_stack to be NULL
  *      - URE if unmapping a segment that is not mapped.
@@ -216,7 +222,7 @@ void SegMem_unmap(SegMem_T mem, word_t seg_id)
         Seq_free(&segment);
         Seq_put(mem->data_segments, seg_id, NULL); 
         
-        /* Save its ID to reuse */
+        /* Save its ID in our stack to reuse */
         Seq_addhi(mem->unmapped_stack, (void *)(uintptr_t)seg_id);
 }
 
@@ -229,12 +235,13 @@ void SegMem_unmap(SegMem_T mem, word_t seg_id)
  *      (word_t) seg_id - The segment to get the word from
  *      (word_t) word_idx - Which word in the segment to get
  * Returns:
- *      (word_t) holding the word      
+ *      (word_t) holding the value stored at that location in memory
  * Notes:
  *      - CRE for mem to be NULL
  *      - CRE for mem->data_segments to be NULL
  *      - CRE for seg_id to refer to a segment which doesn't exist
  *      - URE for word_idx to refer to a word outside the bounds of the segment
+ *        but the Hanson Sequence might CRE it
  */
 word_t SegMem_get_word(SegMem_T mem, word_t seg_id, word_t word_idx)
 {
@@ -259,7 +266,9 @@ word_t SegMem_get_word(SegMem_T mem, word_t seg_id, word_t word_idx)
  * Notes:
  *      - CRE for mem to be NULL
  *      - CRE for mem->data_segments to be NULL
- *      - URE for seg_id 
+ *      - CRE for seg_id to refer to a segment which is unmapped
+ *      - URE for word_idx to refer to a word outside of a segment (although
+ *        the Hanson sequence might CRE it)
  */
 void SegMem_put_word(SegMem_T mem, word_t seg_id, word_t word_idx, 
                          word_t word)
@@ -277,7 +286,7 @@ void SegMem_put_word(SegMem_T mem, word_t seg_id, word_t word_idx,
  * Purpose: 
  *      Loads a new program stored in the given segment to run by copying the
  *      contents of that segment into segment 0 and setting the program counter
- *      to the provided value
+ *      to the provided value. Quick to load segment 0
  * Arguments:
  *      (SegMem_T) mem - The memory to load the program from/into
  *      (word_t) seg_id - The segment in mem to load the program from
@@ -285,6 +294,7 @@ void SegMem_put_word(SegMem_T mem, word_t seg_id, word_t word_idx,
  *                                       start reading instructions from
  * Notes:
  *      - CRE for mem, mem->data_segments, or mem->unmapped_stack to be NULL
+ *      - CRE for seg_id to not 
  *      - URE for seg_id to not refer to a mapped segment
  *      - URE for new_program_counter to refer to an instruction out of bounds
  *        of the new program
@@ -297,8 +307,6 @@ void SegMem_load_program(SegMem_T mem, word_t seg_id,
         assert(mem->data_segments != NULL);
         assert(mem->unmapped_stack != NULL);
 
-        assert(seg_id < (uint32_t)Seq_length(mem->data_segments));
-
         /* Update instruction pointer */
         mem->ip = new_program_counter;
 
@@ -307,18 +315,21 @@ void SegMem_load_program(SegMem_T mem, word_t seg_id,
                 return; 
         } 
 
-        /* Replace old seg0 with copy of new segment */
+        /* Free the old seg0 */
         Seq_T old_seg0 = Seq_get(mem->data_segments, 0);
         Seq_free(&old_seg0); 
         
-        Seq_T to_copy = Seq_get(mem->data_segments, seg_id);        
+        /* Make a copy of the segment to load */
+        assert(seg_id < (uint32_t)Seq_length(mem->data_segments));
+        Seq_T to_copy = Seq_get(mem->data_segments, seg_id); 
+        assert(to_copy != NULL);       
         int length = Seq_length(to_copy);
         Seq_T new_seg_0 = Seq_new(length);
-        
         for (int i = 0; i < length; i++) {
                 Seq_addhi(new_seg_0, Seq_get(to_copy, i)); 
         }
 
+        /* Put the new segment in segment 0 */
         Seq_put(mem->data_segments, 0, new_seg_0);
 }
 

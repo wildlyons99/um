@@ -8,6 +8,8 @@
  * Stores the currently executing code as well as data in 
  * memory. It fetches the next instruction, fetches words from memory, stores 
  * words in memory, maps new segments and unmaps existing segments.
+ *
+ * Exports a type representing the 32-bit words stored in memory
  */
 
 
@@ -17,27 +19,21 @@
 #include <stdio.h>
 #include <stdint.h>
 
-/* Use 32 bit words */
+/* Uses 32 bit words */
 typedef uint32_t word_t;
 
+/* Class type */
 typedef struct SegMem_T *SegMem_T;
 
+/* Methods */
 SegMem_T SegMem_new(FILE *input);
-
 word_t SegMem_fetch_next_i(SegMem_T mem);
-
 void SegMem_put_word(SegMem_T mem, word_t seg_id, word_t word_idx, word_t word);
-
 word_t SegMem_get_word(SegMem_T mem, word_t seg_id, word_t word_idx);
-
-void SegMem_unmap(SegMem_T mem, word_t seg_id);
-
-word_t SegMem_map(SegMem_T mem, word_t size);
-
-void SegMem_free(SegMem_T *mem);
-
 void SegMem_load_program(SegMem_T mem, word_t seg_id,
                          word_t new_program_counter); 
-
+void SegMem_unmap(SegMem_T mem, word_t seg_id);
+word_t SegMem_map(SegMem_T mem, word_t size);
+void SegMem_free(SegMem_T *mem);
 
 #endif

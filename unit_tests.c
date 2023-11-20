@@ -13,8 +13,11 @@
 
 /* Our Libs */
 #include "segmem.h"
+#include "registers.h"
+#include "decode.h"
 
-/* Function Declarations */
+/* Tests */
+/* SegMem */
 void check_constructor_destructor();
 void check_fetch_next_i_basic();
 void check_get_word_seg_0();
@@ -30,6 +33,10 @@ void check_new_segment_all_0s();
 void get_put_word_new_segments(); 
 void check_load_seg_0(); 
 void check_load_seg_other(); 
+
+/* Registers */
+void register_check_constructor_destructor();
+void check_register_read_write(); 
 
 int main()
 {
@@ -52,13 +59,17 @@ int main()
         map_map_segs(); 
         map_unmap_at_limit(10);
         map_unmap_at_limit(0xffff);
-        // map_unmap_at_limit(0xfffffff);
-
+        // map_unmap_at_limit(0xfffffff); /* Takes forever */
         check_new_segment_all_0s(); 
         get_put_word_new_segments(); 
         
+        /* Load_seg */
         check_load_seg_0(); 
         check_load_seg_other(); 
+
+        /* Test registers */
+        register_check_constructor_destructor();
+        check_register_read_write(); 
 }
 
 /* Ensure memory can be properly allacated and deallocated */
@@ -556,3 +567,121 @@ void check_load_seg_other()
         assert(mem == NULL);
 }
 
+/* Allocates a register with the constructor, then deallocates with
+ * the destructor. Ensure instance can be created and freed without memory
+ * leaks in valgrind */ 
+void register_check_constructor_destructor()
+{
+        Registers_T regs = Registers_new(8); 
+        Registers_free(&regs);
+        assert(regs == NULL);
+}
+
+/*
+ * Try placing values in and taking values out, printing them to ensure they
+ * work and no leaks with valgrind
+ * Makes a register with the constructor, writes some values into it, 
+ * reads some values out, makes sure they’re the same, frees it with the 
+ *destructor
+ */
+void check_register_read_write()
+{
+        Registers_T regs = Registers_new(8); 
+        Registers_set(regs, 0, 0x01234567); 
+        Registers_set(regs, 1, 0x89abcdef);
+        
+        uint32_t val1 = Registers_get(regs, 0);
+        uint32_t val2 = Registers_get(regs, 1);
+
+        assert(val1 == 0x01234567); 
+        assert(val2 == 0x89abcdef);
+        
+        Registers_free(&regs);
+        assert(regs == NULL);
+}
+
+/* Make sure the opcode returned is right */
+void check_decode_opcode() {
+        unsigned rA, rB, rC, loadval_rA;
+        uint32_t loadval_value;
+        uint32_t word = 0x89abcdef; 
+        
+        Um_opcode opcode = decode_word(word, &rA, &rB, &rC, &loadval_rA, 
+                                       &loadval_value);
+
+        assert(opcode == 8); 
+        assert(opcode == MAP);
+
+        word = 0x09abcdef; 
+        
+        opcode = decode_word(word, &rA, &rB, &rC, &loadval_rA, 
+                                       &loadval_value);
+
+        assert(opcode == 0); 
+        assert(opcode == CMOV); 
+
+        word = 0x79abcdef; 
+        
+        opcode = decode_word(word, &rA, &rB, &rC, &loadval_rA, 
+                                       &loadval_value);
+
+        assert(opcode == 7); 
+        assert(opcode == HALT);
+
+        word = 0xd9abcdef; 
+        
+        opcode = decode_word(word, &rA, &rB, &rC, &loadval_rA, 
+                                       &loadval_value);
+
+        assert(opcode == 13); 
+        assert(opcode == LV);
+
+        /* See what happens if opcode is out of bounds */
+        word = 0xf9abcdef; 
+        
+        opcode = decode_word(word, &rA, &rB, &rC, &loadval_rA, 
+                                       &loadval_value);
+
+        assert(opcode == 15); 
+        // assert(opcode == LV);
+}
+
+/* Make sure that the 3-registers are being returned correctly */
+void check_decode_3_registers() {
+        unsigned rA, rB, rC, loadval_rA;
+        uint32_t loadval_value;
+        uint32_t word = 0x89abcdef;
+
+        decode_word(word, &rA, &rB, &rC, &loadval_rA, 
+                                       &loadval_value);
+
+        assert(rC == 7); 
+        assert(rB == 5); 
+        assert(rA == 7); 
+
+
+        word = 0x078;
+
+        decode_word(word, &rA, &rB, &rC, &loadval_rA, 
+                                       &loadval_value);
+
+        assert(rC == 0); 
+        assert(rB == 7); 
+        assert(rA == 1); 
+}
+
+
+/* Make sure the loadval value and register are read correctly */
+void check_decode_load_val() {
+        unsigned rA, rB, rC, loadval_rA;
+        uint32_t loadval_value;
+        uint32_t word = 0x89abcdef; 
+        /* 1000 | 100 | 1 1010 1011 1100 1101 1110 1111 */
+
+        decode_word(word, &rA, &rB, &rC, &loadval_rA, 
+                                       &loadval_value);
+
+        assert(loadval_rA == 8);
+        assert(loadval_value == 0x1abcdef);
+        return;
+}

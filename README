@@ -1,0 +1,124 @@
+README
+CS40 Assignment 6 UM
+11/20/2023
+Authors: Tom Lyons     tlyons01
+         Noah Stiegler nstieg01
+
+
+Awknowledgements:
+ - High level discussion of project with Aiden Auretto, Etai Kurzman
+ - Mark Sheldon on Piazza
+
+Correctly/not implemented:
+ - To our knowledge everything is implmented correctly!
+
+Departures from design:
+ - In our design, we received feedback that our method of keeping track of
+   which segments had been mapped or not, and finding new identifiers for 
+   segments to map, could lead to worse performance than we expected. Based on
+   this feedback, we changed our design. Instead of using a Hanson (hash) table
+   to store our segments (using a 32-bit counter to generate new IDs), we 
+   decided to store our segments in a Hanson sequence which was only as large
+   as the largest number of sequences previously concurrently mapped in our
+   program. The benefit of this approach was that (like insertion sort) we had
+   a demarcation between segment IDs we needed to care about (those less than
+   the length of our sequence) and those we didn't (anything longer than the
+   sequence). So at maximum, we only had to keep track of unused identifiers
+   less than the length of the sequence. To do so, we used another sequence as
+   a stack, where each element of the stack was an unused identifier less than
+   the length of our segments sequence. In other words, the stack only held
+   IDs of segments which had previously been mapped and then unmapped, which 
+   were available for reuse without expanding our segment sequence. This
+   provided O(1) access to a fresh segment ID and O(1) access to where 
+   segments were stored in our program.
+
+- Architecture of our system
+
+Our system is broken into four modules. The um module is a client of the other 
+three, and drives the fetch-decode-execute cycle. All memory is stored in the
+SegMem module, which handles all operations on memory. It also keeps track of 
+which instruction um will perform next. In addition, it allows the um module to
+access and set words, perform program loads, and map and unmap segments. As um
+doesn't hold any data itself, it uses the Registers module to hold 8 words at
+a time that it can perform operations on. Registers lets um get and set values
+it holds. Finally, um links the other modules together and handles actually
+executing each instruction by telling the other modules what to do.
+
+
+- How long it takes UM to execute 50,000,000 instructions (and how we know)
+About 13 seconds. We made an um executable which did something (loaded a value)
+1 million times, then we timed how long it took to run on our implementation.
+It took about 0.26s, so for 50M instructions we estimate (50 * 0.26) = 13s
+
+- Talk about each test in UMTESTS (name, what they test, how)
+halt.um - Tests that the program halts correctly by halting 
+
+halt_output.um - Tests that output works correclty by outputting 0 (registers
+                 are initialized to 0)
+
+load_output.um - Tests loading a value works by putting it in a register and
+                 outputting it
+                 
+in_out.um - Tests that loading in a value works by loading one in, outputting
+            it, and making sure that it's the same
+            
+add.um - Tests adding numbers works by adding values loaded into registers
+
+add_w_output.um - Tests adding numbers works by adding values loaded into 
+                  registers and outputting the result (7)
+
+mult_w_output.um - Tests multiplying numbers works by multiplying values 
+                   loaded into registers, then outputting the result (12)
+
+div_w_output.um - Tests dividing numbers works by dividing values loaded into
+                  registers, then outputting the result (3)
+                  
+cmove_test_no.um - Tests whether conditional move will not move a value if
+                   the test value is 0 by loading two values, conditionally 
+                   overwriting one with the other, and making sure it didn't
+                   change by outputting it
+
+cmove_test_yes.um - Tests whether conditional move will move a value if
+                   the test value is not zero by loading two values, 
+                   conditionally overwriting one with the other, and making 
+                   sure it did change by outputting 
+
+halt-verbose.um - Makes sure halt works and doesn't continue execution by
+                  outputting values if the program keeps executing
+
+sstore_test.um  - Tests whether sstore places values by editing the value of
+                  memory in segment 0. Changes a halt instruction to output
+                  a previously loaded value. If the value outputs, it worked
+
+ssload_test.um - Write a value into memory with sstore, then retrieve it with
+                 ssload, making sure it's the same 
+
+map_test.um - Make sure mapping a new segment works by mapping a new segment,
+              storing data in it, loading that data and outputting it,
+              making sure it's the same
+
+nand_test_output.um - Test the NAND truth table by NANDing 1010 (A) and 1100
+                      (C) and making sure the result is 0111 (7) when output
+
+print-six.um - From lab. Adds 48 (ASCII 0 value) to 6 and outputs it. Should
+               output 6
+
+unmap_test.um - Maps a new segment. Stores a value in it. Then unmaps it.
+                making sure no errors occur 
+
+load_program_mapped.um - Makes sure that an instruction can be loaded in from a 
+                   another segement in memory by making a halt instruction, 
+                   storing it into another segment in memory, and loading that
+                   segment as a program, avoiding an output in segment 0 
+
+load_program0.um - Makes sure that seg0 can be loaded as a program, changing 
+                   the program counter (to avoid an output)
+
+Hours analyzing:
+        2.5
+
+Hours preparing design:
+        6
+
+Hours solving problems after analysis:
+        16

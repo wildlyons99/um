@@ -47,16 +47,16 @@ INCLUDES = $(shell echo *.h)
 
 all: um
 
-um: um.o segmem.o bitpack.o
+um: um.o segmem.o bitpack.o registers.o decode.o
 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
-test_main: test_main.o segmem.o bitpack.o
+test_main: test_main.o segmem.o bitpack.o registers.o decode.o
 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 test: unit_tests
 	valgrind ./unit_tests
 
-unit_tests: unit_tests.o segmem.o bitpack.o
+unit_tests: unit_tests.o segmem.o bitpack.o registers.o decode.o
 	$(CC) $(LDFLAGS) $^ -o $@ $(LDLIBS)
 
 # To get *any* .o file, compile its .c file with the following rule.
